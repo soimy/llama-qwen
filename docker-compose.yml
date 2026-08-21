@@ -33,7 +33,7 @@ services:
       - "--port"
       - "8080"
       - "--api-key"
-      - "<LLAMA_API_KEY>"
+      - "${LLAMA_API_KEY}"
     restart: "no"
 
   openwebui:
@@ -45,7 +45,7 @@ services:
       - openwebui:/app/backend/data
     environment:
       - OPENAI_API_BASE_URL=http://llama:8080/v1
-      - OPENAI_API_KEY=<LLAMA_API_KEY>
+      - OPENAI_API_KEY=${LLAMA_API_KEY}
       - OLLAMA_BASE_URL=
       - ENABLE_OPENAI_API=true
       - WEBUI_SEARCH_ENGINE=searxng
