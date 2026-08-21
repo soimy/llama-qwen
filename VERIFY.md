@@ -48,3 +48,14 @@
 - 出站连通：DuckDuckGo / Google / Brave 均 HTTP 200。
 - Open WebUI（3000, v0.11.0）+ llama（8080）+ searxng（内网）三容器运行正常互达；`WEBUI_SEARCH_ENGINE=searxng` / `SEARXNG_QUERY_URL=http://searxng:8080/search?...` env 已在 compose 配置（受鉴权 API 未深查，但链路已通）。
 - 注：SearXNG 未发布宿主端口（HANDOFF 设计如此防滥用），Open WebUI 经容器内网 `searxng:8080` 访问。
+
+## dsh 接入本机 Qwen（2026-08-21, 已完成并验证）
+- **供应商**：`~/.dsh/settings.yaml → llm-pi-ai.providers.local`（route=`local`）
+  - `baseURL: http://localhost:8080/v1`、`api: openai-completions`、`apiKeyEnv: LOCAL_API_KEY`
+  - 模型：`Qwen3.8-27B-UD-Q4_K_M.gguf`，`contextWindow/maxTokens: 131072`
+  - reasoningEfforts：`off: none / low: low / medium: medium / high: high`（见下方值域陷阱）
+- **凭据**：`~/.dsh/.credentials.yaml`（0600）加 `LOCAL_API_KEY: <LLAMA_API_KEY>`
+- **端到端验证**：`dsh --profile headless "..."` 走 local 供应商成功返回（reasoningEffort=medium），`Config` schema 校验通过；测试后 `agent-default-model` 已恢复为 shanhe 默认。
+- **dsh 推理强度（reasoningEfforts）值域陷阱**：
+  - llm-pi-ai 要求键（档位）∈ THINKING_LEVELS（off/minimal/low/medium/high/xhigh/max），值（wire）= 非空字符串（`off` 可用 null/空）。
+  - wire 值会透传为 llama 的 `reasoning_effort`；**实测 llama(qwen35 模板) 只支持 none/low/medium/high**，`minimal`/`max` 返回 HTTP 500（jinja 报错）。故只声明 4 档，勿声明 `minimal/max/xhigh`。
