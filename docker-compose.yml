@@ -24,6 +24,7 @@ services:
       - "${KV_TYPE}"
       - "-ctv"
       - "${KV_TYPE}"
+      - "-nkvo"
       - "-ngl"
       - "${NGPU_LAYERS}"
       - "-t"
