@@ -38,3 +38,13 @@
 - offload 使本机生成吞吐 -67%（42→13.8 tok/s），仅省 ~2.7G 显存，性价比低 → 不开。
 - 崩溃根因是「KV在GPU+256k」把显存顶到 23.9G、只剩 0.1G；改 A 后显存 21.0G、桌面留 ~3.5G，不崩且最快。
 - 若必须 256k 上下文 → 只能 B2（offload, 256k, 13.8 tok/s, 留 5.5G）。
+
+## 视觉 + 联网搜索验证（2026-08-21, 实机）
+**视觉 ✅**（mmproj 挂载, OpenAI 兼容多模态接口）：
+- 生成 256x64 测试图（左红块 + 右蓝块 + 文字）→ 模型正确回答「Left: Red / Right: Blue / 文字 RED LEFT, BLUE RIGHT」，gen ≈ 37.9 t/s。
+
+**联网搜索 ✅**：
+- SearXNG（compose 内网 172.18.0.2:8080, 未发布宿主端口）JSON 接口实测 `?q=RTX 3090 24GB&format=json` 返回 **20 条真实结果**（amazon/ebay/nvidia/techpowerup）。
+- 出站连通：DuckDuckGo / Google / Brave 均 HTTP 200。
+- Open WebUI（3000, v0.11.0）+ llama（8080）+ searxng（内网）三容器运行正常互达；`WEBUI_SEARCH_ENGINE=searxng` / `SEARXNG_QUERY_URL=http://searxng:8080/search?...` env 已在 compose 配置（受鉴权 API 未深查，但链路已通）。
+- 注：SearXNG 未发布宿主端口（HANDOFF 设计如此防滥用），Open WebUI 经容器内网 `searxng:8080` 访问。
