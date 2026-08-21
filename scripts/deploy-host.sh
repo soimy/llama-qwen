@@ -5,22 +5,30 @@
 #   - .env 已生成、docker-compose.yml 已修正 command 语法、镜像已确认存在
 #   - models/Qwen3.8-27B-UD-Q4_K_M.gguf + models/mmproj-F16.gguf 已下载就位
 #
-# 用法：bash scripts/deploy-host.sh
+# 用法：bash scripts/deploy-host.sh   （非 root/非 docker 组成员时自动用 sudo 提权）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# 选择 docker 前缀：root 或已在 docker 组直接用 docker；否则用 sudo docker
+if [ "$(id -u)" -eq 0 ] || id -nG | grep -qw docker; then
+  DOCKER="docker"
+else
+  echo ">> 当前用户不在 docker 组，以下 docker 命令将以 sudo 提权执行"
+  DOCKER="sudo docker"
+fi
+
 echo "==> [1/3] 确保 docker compose v2 可用（含 GPU deploy 语法）"
-if ! docker compose version >/dev/null 2>&1; then
+if ! $DOCKER compose version >/dev/null 2>&1; then
   echo "    未检测到 compose v2 插件，尝试安装 docker-compose 包..."
   sudo pacman -S --noconfirm docker-compose
 fi
-docker compose version
+$DOCKER compose version
 
 echo "==> [2/3] 校验模型文件就位"
 ls -lh models/Qwen3.8-27B-UD-Q4_K_M.gguf models/mmproj-F16.gguf
 
 echo "==> [3/3] 启动 compose 服务（后台）"
-docker compose up -d
+$DOCKER compose up -d
 
 echo "==> 等待 llama server 就绪（最长 120s）"
 for i in $(seq 1 24); do
@@ -33,7 +41,7 @@ done
 
 echo
 echo "==> 服务状态"
-docker compose ps
+$DOCKER compose ps
 echo
 echo "==> llama 模型列表："
 curl -s http://localhost:8080/v1/models || echo "(等待模型装载完成后再试)"
