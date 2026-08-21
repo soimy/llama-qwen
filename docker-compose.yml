@@ -33,7 +33,7 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8080"
-    restart: unless-stopped
+    restart: "no"
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
