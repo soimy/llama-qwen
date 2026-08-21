@@ -2,7 +2,14 @@
 
 > 本文件是本会话的产物。本会话早期环境为 **只读文件系统 + 无 sudo（no-new-privileges）**，无法写盘或修复系统；现已切到 full-access，将完整方案沉淀为 handoff，供新会话（具 root 与可写 FS）直接实现。
 
-**状态更新（2026-08-21）**：`nvidia-smi` 已正常显示 RTX 3090（24 GB / 24576 MiB，驱动 610.57.04，CUDA 13.3），`/dev/nvidia*` 设备节点齐全 —— **驱动修复已完成/本就可用**。剩余待办仅「Docker + nvidia-container-toolkit 安装与 GPU 接入」，需要 root（本会话 `sym` 无 sudo 密码，未能代执行），命令见 `scripts/setup-docker.sh`。
+**状态更新 ①（2026-08-21 早）**：`nvidia-smi` 已正常显示 RTX 3090（24 GB / 24576 MiB，驱动 610.57.04，CUDA 13.3），`/dev/nvidia*` 设备节点齐全 —— **驱动修复已完成/本就可用**。剩余待办仅「Docker + nvidia-container-toolkit 安装与 GPU 接入」，需要 root（本会话 `sym` 无 sudo 密码，未能代执行），命令见 `scripts/setup-docker.sh`。
+
+> ⚠️ 更正（2026-08-21 会话实勘）：上面这条过早乐观。**本会话（dsh-tui 沙箱，`CapEff=0` + no-new-privileges，`/dev` `/sys` 只读）里 `nvidia-smi` 其实持续报「无法与驱动通信」，`/dev/nvidia*` 与 `/dev/dri/*` 缺失** —— 即第 0 节诊断的「udev 陈旧、节点未创建」在这一 boot 并未自动恢复。内核模块健康（610.57.04 / 7.1.8-1），缺的只是设备节点。在**宿主机真实 TTY**（可输 root 密码）手动执行 `scripts/fix-driver-manual.sh` 后 **已成功闭环**：
+
+**状态更新 ②（2026-08-21 实机验证通过 ✅）**：
+1. `udevadm trigger --action=add --subsystem-match=drm --subsystem-match=platform` 后 `/dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-modeset /dev/dri/card1 /dev/dri/renderD128` 全部出现 → 宿主机 `nvidia-smi` 显示 **RTX 3090 / 24576 MiB**（驱动 610.57.04，CUDA UMD 13.3，Persistence-Mode On）。
+2. `nvidia-container-toolkit` + `nvidia-ctk runtime configure --runtime=docker` + docker 装好后，`docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi` **容器内同样可见 3090** → Docker GPU 接入通过。
+> 教训：`-p 'nvidia*'` 是非法写法（`-p` 需 `PROPERTY=VALUE`，被 udevadm 拒绝）；冥号 `nvidia/cuda:12.4.0-base-ubuntu24.04` 不存在（24.04 从 12.4.1 起才有，实测用 12.6.3）。详见第 3 节修正版 runbook 与 `scripts/fix-driver-manual.sh`。
 
 ## 0. 本机事实（已勘察，权威）
 - 系统：CachyOS（Arch 系 rolling），内核 `7.1.8-1-cachyos`，x86_64。
@@ -32,15 +39,24 @@ KV 缓存只计 16 个全注意力层，每 token = 2×4×256 = 2048 元素：
 - 权重选 `UD-Q4_K_M`（质量最好的 Q4，完美适配 24GB）；`Q6_K`(~23GB) 余量过小、`Q8_0`(~29GB) 溢出，均不推荐。
 - 结论：GPU 下 **256K–512K 为甜点**；系统内存作 KV 溢出与 CPU 兜底。
 
-## 3. 系统修复 Runbook（新会话以 root 执行）
+## 3. 系统修复 Runbook（新会话以 root 执行；已固化到 `scripts/fix-driver-manual.sh`，2026-08-21 实机验证 ✅）
 ```bash
-# (A) 实时创建设备节点（首选，免重启）
-systemctl start nvidia-persistenced
+# (A) 实时创建设备节点（首选，免重启）—— 2026-08-21 实测有效
+systemctl enable --now nvidia-persistenced
 udevadm trigger --action=add --subsystem-match=drm --subsystem-match=platform
-udevadm trigger --action=add -p "nvidia*"
+udevadm trigger --type=devices --action=add --subsystem-match=char
 udevadm settle
-ls -l /dev/nvidia0 /dev/nvidiactl /dev/dri          # 应出现
+ls -l /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-modeset /dev/dri   # 应出现
 nvidia-smi                                          # 应显示 3090 / 24GB
+# 注意：不要写 `udevadm trigger -p 'nvidia*'`（-p 需 PROPERTY=VALUE，非法，会报
+# "Missing '=' in key/value pair"）。char 子系统那条用于重建 /dev/nvidia*（主设备 195）。
+
+# (A') 若 A 后仍缺 /dev/nvidia*：driver rebind 重建节点
+echo 0000:07:00.0 > /sys/bus/pci/drivers/nvidia/unbind
+echo 0000:07:00.0 > /sys/bus/pci/drivers/nvidia/bind
+udevadm settle
+ls -l /dev/nvidia* /dev/dri
+nvidia-smi
 
 # (B) 若仍缺节点：重装 open 驱动并重启（最干净）
 pacman -S --noconfirm linux-cachyos-nvidia-open nvidia-utils opencl-nvidia
@@ -51,9 +67,10 @@ reboot
 pacman -S --noconfirm docker nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker       # 写入 /etc/docker/daemon.json 的 nvidia runtime
 systemctl enable --now docker
-docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu24.04 nvidia-smi   # 容器内可见 3090 即通过
+# 容器内可见 3090 即通过；注意 12.4.0 无 ubuntu24.04 标签，用 12.6.3（实测通过）
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
 ```
-> 风险点：若 `nvidia-smi` 仍失败，回到 (B) 重启；`--gpus all` 必须等 (C) 完成（nvidia-container-toolkit + nvidia-ctk）才可用。
+> 风险点：若 `nvidia-smi` 仍失败，回到 (B) 重启；`--gpus all` 必须等 (C) 完成（nvidia-container-toolkit + nvidia-ctk）才可用。整套命令已固化到 `scripts/fix-driver-manual.sh`。
 
 ## 4. 仓库文件（在 `/home/sym/Repo/llama-qwen` 新建）
 目录结构：
@@ -65,7 +82,11 @@ llama-qwen/
 ├── README.md
 ├── docker-compose.yml
 ├── searxng/settings.yml
-└── scripts/download-model.sh
+└── scripts/
+    ├── download-model.sh
+    ├── fix-driver-manual.sh     # 驱动修复命令脚本（实测有效，新增）
+    ├── setup-docker.sh
+    ├── sudd & co.               # dsh-tui 提权包装（脚本族）
 ```
 
 ### 4.1 `.gitignore`
@@ -184,7 +205,7 @@ ls -lh "$DEST"
 
 ### 4.6 `Makefile`
 ```make
-.PHONY: download up down logs fix-driver
+.PHONY: download up down logs fix-driver setup-docker
 download:
 	bash scripts/download-model.sh
 up:
@@ -194,13 +215,14 @@ down:
 logs:
 	docker compose logs -f
 fix-driver:
-	@echo "以 root 在可写系统执行："; \
-	 echo "systemctl start nvidia-persistenced"; \
-	 echo "udevadm trigger --action=add --subsystem-match=drm --subsystem-match=platform"; \
-	 echo "udevadm trigger --action=add -p 'nvidia*'"; \
-	 echo "udevadm settle"; \
-	 echo "nvidia-smi"
+	@echo "以 root 修驱动：见 scripts/fix-driver-manual.sh；"
+	@echo "  sudo bash scripts/fix-driver-manual.sh           # 全流程"
+	@echo "  sudo bash scripts/fix-driver-manual.sh --nodes   # 仅重建设备节点"
+	@echo "  bash scripts/fix-driver-manual.sh --help         # 纯命令清单"
+setup-docker:
+	sudd bash scripts/setup-docker.sh
 ```
+> 更正：旧版 `fix-driver` 里的 `udevadm trigger -p 'nvidia*'` 非法（`-p` 需 `PROPERTY=VALUE`），已用 `scripts/fix-driver-manual.sh` 修正并实测通过。
 
 ### 4.7 `README.md`（要点）
 - 硬件适配：RTX 3090 24GB，权重 Q4_K_M 全量上 GPU（`-ngl 99`），KV `q4_0`，上下文 256K。
@@ -210,14 +232,14 @@ fix-driver:
 - 故障排查：见第 3、5 节。
 
 ## 5. 验证 / 验收
-1. `nvidia-smi` 显示 3090 / 24 GB（驱动修复）。
-2. `docker run --rm --gpus all ... nvidia-smi` 容器内可见 3090（Docker GPU）。
+1. ✅ `nvidia-smi` 显示 3090 / 24 GB（驱动修复）—— **2026-08-21 实机通过**（610.57.04 / CUDA 13.3）。
+2. ✅ `docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi` 容器内可见 3090（Docker GPU）—— **2026-08-21 实机通过**。
 3. `curl localhost:8080/v1/models` 返回 `Qwen3.8-27B`；`nvidia-smi` 显存 ~20 GB。
 4. Open WebUI 上传图片可描述（视觉）；开 Web Search 问实时问题有引用（搜索）。
 5. 压测 ~50K token 长输入下 KV Q4 不 OOM、可生成。
 
 ## 6. 风险与失败模式
-- 驱动节点缺失：回到第 3 节 (B) 重启/重装；Docker 必须 (C) 完成才能 `--gpus all`。
+- 驱动节点缺失：回到第 3 节 (B) 重启/重装；Docker 必须 (C) 完成才能 `--gpus all`。链路已实测通过，详见 `scripts/fix-driver-manual.sh`。
 - 架构支持：若官方 `:server-cuda` 加载 GGUF 报未知架构，回退自构建最新 master CUDA 镜像，或参考 fork `VeroFess/llama.cpp_3090x2_qwen3.8_q8_opt`（TCQ/MTP 为性能增强，非必需）。
 - mmproj 不匹配：统一用 `unsloth/Qwen3.8-27B-GGUF` 的 `mmproj-F16.gguf`；不符则换 `mmproj-BF16.gguf` 或官方 `Qwen/Qwen3.8-27B` 的 mmproj。
 - SearXNG 出站：联网搜索依赖本机出站访问公开引擎；受限时 Web Search 返回空，但模型与视觉不受影响。

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#
+# sudd-noninteractive — 非交互 sudo 提权（脚本化自动执行）
+#
+# 用于无法弹 GUI、也不想弹框的自动化场景：从环境变量 SUDO_PASS 或文件
+# SUDO_PASS_FILE 读取密码，通过 `sudo -S` 输入。可配合 sudo 凭据缓存，
+# 在 timeout 内后台任务可持续用。
+#
+# ⚠️ 安全警告：SUDO_PASS 里的密码会出现在进程环境里，可能被同级用户读取。
+#    优先用 SUDO_PASS_FILE（权限 600）或后台一次性 -k 清理。仅在本机可信时使用。
+#
+# 用法：
+#   SUDO_PASS='...' sudd-noninteractive pacman -S docker
+#   SUDO_PASS_FILE=/root/.pw sudd-noninteractive -E pacman -Syu
+#   sudd-noninteractive -k     # 清除凭据缓存
+
+set -euo pipefail
+
+if [ "${1:-}" = "-k" ]; then
+  sudo -k
+  echo "已清除 sudo 凭据缓存。"
+  exit 0
+fi
+
+PASS=""
+if [ -n "${SUDO_PASS_FILE:-}" ] && [ -f "$SUDO_PASS_FILE" ]; then
+  PASS="$(<"$SUDO_PASS_FILE")"
+elif [ -n "${SUDO_PASS:-}" ]; then
+  PASS="$SUDO_PASS"
+fi
+
+if [ -z "$PASS" ]; then
+  echo "错误：需要 SUDO_PASS 或 SUDO_PASS_FILE 提供密码。" >&2
+  exit 1
+fi
+
+printf '%s\n' "$PASS" | sudo -S -p '' "$@"

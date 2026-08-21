@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# sudd-text — 无 GUI 环境（如 SSH/纯控制台）下的 sudo 提权替代品
+#
+# 在没有 zenity/kdialog 的终端里，用 systemd-ask-password 作为 askpass：
+# 它会把密码问询交给系统密码代理。若你在自己的终端跑着一个
+# `systemd-ask-password-agent`，就能在那里输入密码，而无须 TTY。
+#
+# 用法：
+#   sudd-text id
+#   sudd-text pacman -Syu
+#   sudd-text -k        # 清除凭据缓存
+#
+# 也可以完全不弹交互，直接从受保护的变量读密码（脚本化、非交互）：
+#   SUDO_PASS=xxx sudd-noninteractive id   # 见下方同目录 sudd-noninteractive
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")" && pwd)"
+ASKPASS="$SCRIPT_DIR/sudo-askpass-text.sh"
+
+export SUDO_ASKPASS="$ASKPASS"
+
+if [ "${1:-}" = "-k" ]; then
+  sudo -k
+  echo "已清除 sudo 凭据缓存。"
+  exit 0
+fi
+exec sudo -A "$@"

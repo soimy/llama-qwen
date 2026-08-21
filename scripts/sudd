@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# sudd — dsh-tui 中可用的图形化/交互式 sudo 提权包装器
+#
+# 背景：dsh-tui 把每条 bash 命令放在"无 TTY、无 stdin、全新 shell"里执行，
+# 因此裸 `sudo` 无法让你输入密码（会报 “sudo: a password is required”）。
+# `sudd` 通过 SUDO_ASKPASS + `sudo -A`，把密码问询转成桌面上弹出的对话框
+# （zenity/kdialog/yad），你在对话框输入一次密码即可，且 sudo 会在
+# timestamp_timeout（默认 15 分钟）内缓存凭据，期间再次 `sudd` 不再弹框。
+#
+# 用法：
+#   sudd whoami                 # 以 root 跑命令（首次弹框输密码）
+#   sudd pacman -S docker       # 安装软件包
+#   sudd -k                     # 立即清除缓存的 sudo 凭据
+#   sudd -- sudo ...            # sudo 参数透传（如 sudd -- -E pacman -Syu）
+#   SUDO_ASKPASS_TITLE="XX" sudd cmd   # 自定义弹框标题
+#
+# 定位脚本所在目录（兼容符号链接与从任意 cwd 调用）。
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")" && pwd)"
+ASKPASS="$SCRIPT_DIR/sudo-askpass.sh"
+
+# 允许用户用环境变量覆盖 askpass 脚本（例如测试或自定义对话框）。
+export SUDO_ASKPASS="${SUDO_ASKPASS:-$ASKPASS}"
+export SUDO_ASKPASS_REQUIRE=1   # 强制走 askpass（而非尝试 /dev/tty）
+
+# --- sudd -k : 清除 sudo 凭据缓存 ----------------------------------------
+if [ "${1:-}" = "-k" ]; then
+  sudo -k
+  echo "已清除 sudo 凭据缓存。"
+  exit 0
+fi
+
+# 确保 askpass 脚本存在且可执行。
+if [ ! -x "$SUDO_ASKPASS" ]; then
+  echo "错误：找不到可执行的 askpass 脚本：$SUDO_ASKPASS" >&2
+  exit 1
+fi
+
+# 透传给 sudo。`.` 表示"以 root 执行之后的命令"。
+if [ "${1:-}" = "--" ]; then
+  shift
+  exec sudo -A "$@"
+fi
+
+exec sudo -A "$@"
