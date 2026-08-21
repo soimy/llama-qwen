@@ -1,0 +1,58 @@
+services:
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: qwen-llama
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command:
+      - "-m";        - "/models/${MODEL_FILE}"
+      - "--mmproj";  - "/models/mmproj-F16.gguf"
+      - "-c";        - "${CTX_SIZE}"
+      - "-ctk";      - "${KV_TYPE}"
+      - "-ctv";      - "${KV_TYPE}"
+      - "-ngl";      - "${NGPU_LAYERS}"
+      - "-t";        - "${THREADS}"
+      - "--host";    - "0.0.0.0"
+      - "--port";    - "8080"
+    restart: unless-stopped
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: qwen-openwebui
+    ports:
+      - "${OPEN_WEBUI_PORT}:8080"
+    volumes:
+      - openwebui:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URL=http://llama:8080/v1
+      - OLLAMA_BASE_URL=
+      - ENABLE_OPENAI_API=true
+      - WEBUI_SEARCH_ENGINE=searxng
+      - SEARXNG_QUERY_URL=http://searxng:8080/search?q=%s&format=json
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    depends_on:
+      - llama
+      - searxng
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: qwen-searxng
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_PORT=8080
+      - SEARXNG_BIND_ADDRESS=0.0.0.0
+    restart: unless-stopped
+
+volumes:
+  openwebui: {}
