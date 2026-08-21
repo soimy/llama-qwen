@@ -2,6 +2,8 @@
 
 > 本文件是本会话的产物。本会话早期环境为 **只读文件系统 + 无 sudo（no-new-privileges）**，无法写盘或修复系统；现已切到 full-access，将完整方案沉淀为 handoff，供新会话（具 root 与可写 FS）直接实现。
 
+**状态更新（2026-08-21）**：`nvidia-smi` 已正常显示 RTX 3090（24 GB / 24576 MiB，驱动 610.57.04，CUDA 13.3），`/dev/nvidia*` 设备节点齐全 —— **驱动修复已完成/本就可用**。剩余待办仅「Docker + nvidia-container-toolkit 安装与 GPU 接入」，需要 root（本会话 `sym` 无 sudo 密码，未能代执行），命令见 `scripts/setup-docker.sh`。
+
 ## 0. 本机事实（已勘察，权威）
 - 系统：CachyOS（Arch 系 rolling），内核 `7.1.8-1-cachyos`，x86_64。
 - CPU：AMD Ryzen 5 5600，6 核 / 12 线程，AVX2（无 AVX-512）。

@@ -4,8 +4,9 @@
 权重 `Q4_K_M` 全量上 GPU（`-ngl 99`），KV 缓存 `q4_0`（`-ctk/-ctv q4_0`）以最大化上下文，
 叠加 **视觉**（`--mmproj`）与 **本地联网搜索**（SearXNG + Open WebUI Web Search，无第三方 Key）。
 
-## 0. 前置：修复 NVIDIA 驱动（首次必须）
-本机驱动内核模块已加载，但 `/dev/nvidia*` 设备节点缺失（`nvidia-smi` 报错）。
+## 0. 前置：NVIDIA 驱动（已确认可用）
+截至 2026-08-21，`nvidia-smi` 已正常显示 RTX 3090（24 GB，驱动 610.57.04，CUDA 13.3），
+`/dev/nvidia*` 设备节点齐全，**无需再修驱动**。若换环境后 `nvidia-smi` 报错、节点缺失，
 以 root 执行（详见 `HANDOFF.md` 第 3 节）：
 ```bash
 systemctl start nvidia-persistenced
