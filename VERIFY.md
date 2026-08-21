@@ -25,3 +25,16 @@
 
 ## 待宿主执行的最后一步
 `bash scripts/deploy-host.sh` → docker compose up + /v1/models 验证 (沙箱无 docker daemon 访问权)
+
+## KV offload A/B 实测（2026-08-21, 宿主 docker `scripts/kv-ab-test.sh`）
+| 用例 | 配置 | prompt t/s | gen t/s | GPU used (MiB) |
+|---|---|---|---|---|
+| A | KV在GPU, 128k | 1093.0 | **42.24** | 21027 |
+| B1 | offload, 128k | 652.1 | 13.87 | 18277 |
+| B2 | offload, 256k | 648.9 | 13.77 | 19063 |
+| (参考) | KV在GPU, 256k | — | 36.5 | ~23900 |
+
+**结论（已采纳）：方案 A —— KV 留 GPU（不用 `-nkvo`）+ 上下文 128k（`CTX_SIZE=131072`）**
+- offload 使本机生成吞吐 -67%（42→13.8 tok/s），仅省 ~2.7G 显存，性价比低 → 不开。
+- 崩溃根因是「KV在GPU+256k」把显存顶到 23.9G、只剩 0.1G；改 A 后显存 21.0G、桌面留 ~3.5G，不崩且最快。
+- 若必须 256k 上下文 → 只能 B2（offload, 256k, 13.8 tok/s, 留 5.5G）。
