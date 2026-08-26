@@ -2,6 +2,7 @@ services:
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: qwen-llama
+    runtime: nvidia
     volumes:
       - ./models:/models
     ports:
@@ -26,8 +27,64 @@ services:
       - "${KV_TYPE}"
       - "-ngl"
       - "${NGPU_LAYERS}"
+      # MTP self-speculative decoding（Qwen3.8 GGUF 自带 nextn head，n-max 2 为 24GB 卡甜点）
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+      - "--parallel"
+      - "1"
       - "-t"
       - "${THREADS}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--api-key"
+      - "${LLAMA_API_KEY}"
+    restart: "no"
+
+  # 备用模型：orcarouter/Qwen3.8-27B-Uncensored-GGUF（abliterated 版，自带视觉塔）。
+  # 3090 只够同时跑一个 27B Q4，故用 profile "uncensored" 隔离——默认 `make up`/`deploy-host.sh`
+  # 不会拉起它；需要时 `make up-uncensored`（等价 --profile uncensored）单独启动，端口 8081。
+  llama-uncensored:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: qwen-llama-uncensored
+    runtime: nvidia
+    profiles: ["uncensored"]
+    volumes:
+      - ./models:/models
+    ports:
+      - "8081:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command:
+      - "-m"
+      - "/models/${MODEL_FILE_UNCENSORED}"
+      - "--mmproj"
+      - "/models/${MMPROJ_FILE_UNCENSORED}"
+      - "-c"
+      - "${CTX_SIZE_UNCENSORED}"
+      - "-ctk"
+      - "${KV_TYPE_UNCENSORED}"
+      - "-ctv"
+      - "${KV_TYPE_UNCENSORED}"
+      - "-ngl"
+      - "${NGPU_LAYERS_UNCENSORED}"
+      # MTP self-speculative decoding（Qwen3.8 GGUF 自带 nextn head）
+      - "--spec-type"
+      - "draft-mtp"
+      - "--spec-draft-n-max"
+      - "2"
+      - "--parallel"
+      - "1"
+      - "-t"
+      - "${THREADS_UNCENSORED}"
       - "--host"
       - "0.0.0.0"
       - "--port"
@@ -51,10 +108,11 @@ services:
       - WEBUI_SEARCH_ENGINE=searxng
       - SEARXNG_QUERY_URL=http://searxng:8080/search?q=%s&format=json
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+    # 不依赖 llama：无论跑主模型还是 uncensored（--profile uncensored），WebUI 单独启动即可，
+    # 连接由 Settings → Connections 配置（含默认的 http://llama:8080/v1 与备用 :8081）。
     depends_on:
-      - llama
       - searxng
-    restart: unless-stopped
+    restart: "no"
 
   searxng:
     image: searxng/searxng:latest
@@ -64,7 +122,7 @@ services:
     environment:
       - SEARXNG_PORT=8080
       - SEARXNG_BIND_ADDRESS=0.0.0.0
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   openwebui: {}
