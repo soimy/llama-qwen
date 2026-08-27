@@ -1,4 +1,12 @@
+# 可重建 / 本地环境，不随仓库分发（其他设备用 make download 等命令重建）
+# 注意：gitignore 不支持行内注释，注释必须单独成行
+
+# 模型权重（33G；make download / make download-uncensored 重建）
 models/
 *.gguf
+
+# 本地密钥（LLAMA_API_KEY、WEBUI_SECRET_KEY 等），模板见 .env.example
 .env
+
+# llama.cpp 本地构建源码（可重新 clone + build）
 .llamacheck/

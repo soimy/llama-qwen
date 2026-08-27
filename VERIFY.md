@@ -53,9 +53,9 @@
 - **供应商**：`~/.dsh/settings.yaml → llm-pi-ai.providers.local`（route=`local`）
   - `baseURL: http://localhost:8080/v1`、`api: openai-completions`、`apiKeyEnv: LOCAL_API_KEY`
   - 模型：`Qwen3.8-27B-UD-Q4_K_M.gguf`，`contextWindow/maxTokens: 131072`
-  - reasoningEfforts：`off: none / low: low / medium: medium / high: high`（见下方值域陷阱）
-- **凭据**：`~/.dsh/.credentials.yaml`（0600）加 `LOCAL_API_KEY: <LLAMA_API_KEY>`
+  - reasoningEfforts：`off: none / low: low / medium: medium / high: xhigh`（见下方值域陷阱）
+- **凭据**：`~/.dsh/.credentials.yaml`（0600）加 `LOCAL_API_KEY: <你的 LLAMA_API_KEY，与 .env 同值>`
 - **端到端验证**：`dsh --profile headless "..."` 走 local 供应商成功返回（reasoningEffort=medium），`Config` schema 校验通过；测试后 `agent-default-model` 已恢复为 shanhe 默认。
 - **dsh 推理强度（reasoningEfforts）值域陷阱**：
   - llm-pi-ai 要求键（档位）∈ THINKING_LEVELS（off/minimal/low/medium/high/xhigh/max），值（wire）= 非空字符串（`off` 可用 null/空）。
-  - wire 值会透传为 llama 的 `reasoning_effort`；**实测 llama(qwen35 模板) 只支持 none/low/medium/high**，`minimal`/`max` 返回 HTTP 500（jinja 报错）。故只声明 4 档，勿声明 `minimal/max/xhigh`。
+  - wire 值会透传为 llama 的 `reasoning_effort`；**当前两个 GGUF（UD 与 Uncensored）的 qwen35 模板实测只支持 none / low / medium / xhigh，`high` 会返回 HTTP 500**（jinja `Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.`）。故 `local` 供应商把 `high`、`max` 两档 wire 值都映射为 `xhigh`（2026-08-26 修正；早先 8-21 记录的值域以当时的模板为准）。

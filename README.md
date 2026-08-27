@@ -75,3 +75,29 @@ make up              # 启动 llama.cpp(CUDA) + Open WebUI + SearXNG
 3. Open WebUI 上传图片可描述；开 Web Search 问实时问题有引用。
 
 详见 [`HANDOFF.md`](./HANDOFF.md)（完整决策、风险与回退方案）。
+
+## 4. 备用模型：orcarouter/Qwen3.8-27B-Uncensored-GGUF（uncensored / abliterated）
+
+本仓库参照现有 `llama` 服务，另加了 `llama-uncensored` 服务：同一 llama.cpp CUDA 镜像，
+权重用 orcarouter 的 `Qwen3.8-27B-Uncensored-Q4_K_M.gguf`（~15.6 GB）+ 自带视觉塔
+`mmproj-Qwen3.8-27B-Uncensored-f16.gguf`，监听 **8081**。默认量化档同主模型为 Q4_K_M，
+KV 策略（`q4_0`）、`-ngl 99`、线程数均与主模型一致（变量名带 `_UNCENSORED` 后缀，可单独调）。
+
+- ⚠️ RTX 3090 只有 24 GB，**两套 27B Q4 权重不能同时常驻**，二选一运行。该服务用 compose
+  `profile: uncensored` 隔离——平时的 `make up` / `scripts/deploy-host.sh` **不会**把它拉起，
+  也不会误占显存。
+- 下载权重：
+  ```bash
+  make download-uncensored      # 拉 orcarouter Q4_K_M + 其 mmproj 到 ./models
+  ```
+- 切换运行（先停旧、再启新）：
+  ```bash
+  make down && make up-uncensored
+  # 等价：docker compose --profile uncensored up -d llama-uncensored openwebui searxng
+  make down-uncensored          # 只停 uncensored（保留主模型栈）
+  ```
+- 在 Open WebUI 使用：Settings → Connections → 「+」新增连接
+  `URL: http://localhost:8081/v1`，`API Key` 填 `LLAMA_API_KEY`，然后聊天框模型下拉选
+  含 `Uncensored` 的那个（默认主连接 `http://llama:8080/v1` 在主模型停掉时会显示 offline，
+  可忽略或删除）。
+- 想更省显存/更快可把 `MODEL_FILE_UNCENSORED` 换成 `Qwen3.8-27B-Uncensored-IQ4_XS.gguf`（~14.3 GB）。

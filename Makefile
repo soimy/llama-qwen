@@ -1,12 +1,27 @@
-.PHONY: download up down logs fix-driver setup-docker
+.PHONY: download download-uncensored up up-uncensored down down-uncensored logs fix-driver setup-docker autostart-off install-gpu-nodes
 download:
+	bash scripts/download-model.sh
+
+# 备用模型：orcarouter/Qwen3.8-27B-Uncensored-GGUF（abliterated，自带视觉塔）
+download-uncensored:
+	MODEL_REPO=orcarouter/Qwen3.8-27B-Uncensored-GGUF \
+	MODEL_PREFIX=Qwen3.8-27B-Uncensored \
+	MMPROJ_FILE=mmproj-Qwen3.8-27B-Uncensored-f16.gguf \
+	QUANT=Q4_K_M \
 	bash scripts/download-model.sh
 
 up:
 	docker compose up -d
 
+# 备用模型单独启动（profile 隔离，避免误拉两个 27B 占满 3090 显存）；先 make down 停掉旧模型
+up-uncensored:
+	docker compose --profile uncensored up -d llama-uncensored openwebui searxng
+
 down:
-	docker compose down
+	docker compose --profile uncensored down
+
+down-uncensored:
+	docker compose --profile uncensored stop llama-uncensored
 
 logs:
 	docker compose logs -f
@@ -20,3 +35,11 @@ fix-driver:
 
 setup-docker:
 	sudd bash scripts/setup-docker.sh
+
+# 把已存在容器的重启策略全部改为 no（配合 compose 的 restart:"no"），开机不再自启
+autostart-off:
+	bash scripts/disable-autostart.sh
+
+# 安装开机自动重建 /dev/nvidia* 节点的 oneshot 服务（udev 陈旧 workaround，需 root）
+install-gpu-nodes:
+	sudd bash scripts/install-gpu-nodes-service.sh
