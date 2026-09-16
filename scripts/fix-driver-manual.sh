@@ -38,6 +38,17 @@ nvidia-ctk runtime configure --runtime=docker
 systemctl enable --now docker
 docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi   # 容器内可见 3090 即通过'
 
+# CDI 规格：nvidia-container-toolkit 靠 /etc/cdi/nvidia.yaml 决定往容器注入哪些设备（写死 major:minor）。
+# nvidia-uvm 的主设备号是内核每次加载 nvidia_uvm 时动态分配的（本机实测 237 → 238），规格过期后
+# 容器里 /dev/nvidia-uvm 会指到别的设备，cuInit 失败 → llama.cpp 静默回落 CPU、显存不涨
+# （容器仍 healthy、容器内 nvidia-smi 也正常，是最难查的一类）。2026-09-16 实机根因。
+STEP_CDI='# 刷新 CDI 规格，并核对 uvm 主设备号与内核当前分配值一致
+nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+echo "--- 规格里的 uvm 节点（major 应与下一行一致）---"
+grep -A2 "path: /dev/nvidia-uvm$" /etc/cdi/nvidia.yaml
+echo "--- 内核当前分配 ---"
+grep -w "nvidia-uvm" /proc/devices'
+
 help() {
   cat <<'EOF'
 ━━━ NVIDIA RTX 3090 驱动修复命令清单（宿主机 TTY / root 执行）━━━
@@ -54,9 +65,13 @@ $ STEP3
 第 4 步 Docker GPU 接入（驱动通后）：
 $ STEP4
 
+第 5 步 CDI 规格刷新（容器里 CUDA init 失败 / 显存不涨时先查这个）：
+$ STEP_CDI
+
 通过判定：
   - 宿主机 nvidia-smi 显示 "RTX 3090 … 24576 MiB"
   - docker run --gpus all ... nvidia-smi 容器内同样可见 3090
+  - CDI 规格里 /dev/nvidia-uvm 的 major == /proc/devices 里 nvidia-uvm 的主设备号
 EOF
 }
 
@@ -70,6 +85,14 @@ if [ "${1:-}" = "--nodes" ]; then
   echo "$STEP1" | sed 's/^/    /'
   echo "---- 执行 ----"
   bash -c "$STEP1"
+  exit 0
+fi
+
+if [ "${1:-}" = "--cdi" ]; then
+  echo "==> 第 5 步：刷新 CDI 规格（容器 GPU 注入；需 root 写 /etc/cdi/nvidia.yaml）"
+  echo "$STEP_CDI" | sed 's/^/    /'
+  echo "---- 执行 ----"
+  bash -c "$STEP_CDI"
   exit 0
 fi
 
@@ -92,6 +115,15 @@ else
     bash -c "$STEP3"
     exit 0
   fi
+fi
+
+echo
+echo "==> 第 2 步后置：刷新 CDI 规格（容器里 CUDA 失败的常见根因，见 STEP_CDI 注释）"
+if command -v nvidia-ctk >/dev/null 2>&1; then
+  bash -c "$STEP_CDI"
+else
+  echo "nvidia-ctk 未安装，手动执行："
+  echo "$STEP_CDI" | sed 's/^/    /'
 fi
 
 echo

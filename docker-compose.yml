@@ -17,6 +17,9 @@ services:
     command:
       - "-m"
       - "/models/${MODEL_FILE}"
+      # 对外暴露的模型名（默认 qwen3.8-27b），免得外部 harness 去填整个文件路径
+      - "-a"
+      - "${MODEL_ALIAS}"
       - "--mmproj"
       - "/models/mmproj-F16.gguf"
       - "-c"
@@ -66,6 +69,9 @@ services:
     command:
       - "-m"
       - "/models/${MODEL_FILE_UNCENSORED}"
+      # 与主模型共用 qwen3.8-27b（另挂 qwen3.8-27b-uncensored），切模型无需改 harness 配置
+      - "-a"
+      - "${MODEL_ALIAS_UNCENSORED}"
       - "--mmproj"
       - "/models/${MMPROJ_FILE_UNCENSORED}"
       - "-c"

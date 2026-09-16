@@ -49,13 +49,48 @@
 - Open WebUI（3000, v0.11.0）+ llama（8080）+ searxng（内网）三容器运行正常互达；`WEBUI_SEARCH_ENGINE=searxng` / `SEARXNG_QUERY_URL=http://searxng:8080/search?...` env 已在 compose 配置（受鉴权 API 未深查，但链路已通）。
 - 注：SearXNG 未发布宿主端口（HANDOFF 设计如此防滥用），Open WebUI 经容器内网 `searxng:8080` 访问。
 
-## dsh 接入本机 Qwen（2026-08-21, 已完成并验证）
-- **供应商**：`~/.dsh/settings.yaml → llm-pi-ai.providers.local`（route=`local`）
-  - `baseURL: http://localhost:8080/v1`、`api: openai-completions`、`apiKeyEnv: LOCAL_API_KEY`
-  - 模型：`Qwen3.8-27B-UD-Q4_K_M.gguf`，`contextWindow/maxTokens: 131072`
-  - reasoningEfforts：`off: none / low: low / medium: medium / high: xhigh`（见下方值域陷阱）
+## dsh 接入本机 Qwen（2026-08-21 建立；2026-09-14 改为短别名 + responses 协议）
+- **供应商**：`~/.dsh/settings.yaml → llm-pi-ai.providers` 下两个 route
+  - `local` → `http://localhost:8080/v1`（主模型）；`local-uncensored` → `http://localhost:8081/v1`（uncensored）
+  - 两者均为 `api: openai-responses`、`apiKeyEnv: LOCAL_API_KEY`
+  - **模型 id 统一为 `qwen3.8-27b`**（llama-server `--alias` 提供，见 README 第 5 节）：两个模型共用
+    同一短名，切换模型时 dsh 配置无需改动。此前填的是权重全名（`Qwen3.8-27B-UD-Q4_K_M.gguf` /
+    `Qwen3.8-27B-Uncensored-Q4_K_M.gguf`），过于冗长。
+  - `contextWindow/maxTokens: 131072`；reasoningEfforts：`off: none / low: low / medium: medium / high: xhigh`（见下方值域陷阱）
 - **凭据**：`~/.dsh/.credentials.yaml`（0600）加 `LOCAL_API_KEY: <你的 LLAMA_API_KEY，与 .env 同值>`
-- **端到端验证**：`dsh --profile headless "..."` 走 local 供应商成功返回（reasoningEffort=medium），`Config` schema 校验通过；测试后 `agent-default-model` 已恢复为 shanhe 默认。
+- **端到端验证**（2026-09-14）：把 `agent-default-model` 临时指向 `local-uncensored` 后
+  `dsh --profile headless "只回答两个字：收到"` 成功返回（reasoning 走 stderr、正文正确），
+  证明 `openai-responses` 协议 + `qwen3.8-27b` 别名链路通畅；测试后 `agent-default-model`
+  已还原为 `deepseek-official / deepseek-v4.1-flash-expires-on-0910`。
 - **dsh 推理强度（reasoningEfforts）值域陷阱**：
   - llm-pi-ai 要求键（档位）∈ THINKING_LEVELS（off/minimal/low/medium/high/xhigh/max），值（wire）= 非空字符串（`off` 可用 null/空）。
   - wire 值会透传为 llama 的 `reasoning_effort`；**当前两个 GGUF（UD 与 Uncensored）的 qwen35 模板实测只支持 none / low / medium / xhigh，`high` 会返回 HTTP 500**（jinja `Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.`）。故 `local` 供应商把 `high`、`max` 两档 wire 值都映射为 `xhigh`（2026-08-26 修正；早先 8-21 记录的值域以当时的模板为准）。
+
+## 容器 CUDA 静默回落排查（2026-09-16，`make up-uncensored` 显存不涨）
+
+**现象**：`qwen-llama-uncensored` Up (healthy)、8081 可访问，但显存只有 ~1.1 GB（桌面基线）、
+生成 ~10 tok/s。日志头两行是唯一线索：
+`E ggml_cuda_init: failed to initialize CUDA: unknown error` +
+`warning: no usable GPU found, --gpu-layers option will be ignored`（`-ngl 99` 被丢弃，27B 跑在系统内存里）。
+
+**根因**：`/etc/cdi/nvidia.yaml`（生成于 2026-09-09 12:26）把 `/dev/nvidia-uvm` 写死 `major: 237`
+且不含任何 `/dev/nvidia-caps/*`；而本次开机内核给 nvidia-uvm 分配的是 **238**（237 现在是 nvme）。
+容器因此拿到假 uvm 设备（`--gpus all` 实测容器内为 `crw-rw-rw- 237, 0 /dev/nvidia-uvm`，strace：
+`openat("/dev/nvidia-uvm", O_RDWR|O_CLOEXEC) = -1 EPERM`）→ cuInit 失败 → CPU 回落。
+**宿主机 `/dev` 本身是好的**：`-v /dev:/hostdev` 实测 195:0 / 195:255 / 195:254 / 238:0 / 238:1 /
+241:1,2 全齐。教训：dsh-tui 沙箱屏蔽 `/dev`，裸跑宿主机 `nvidia-smi` 会假报「无法与驱动通信」，
+判断 GPU 一律进容器判断。
+
+**修复与验证（实机通过）**：
+1. `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`（旧规格备份为 `nvidia.yaml.stale-20260916-*`），
+   新规格 `/dev/nvidia-uvm` = `major: 238` / `nvidia-uvm-tools` = `238:1`。
+2. stock 容器（不加任何额外挂载）两条路径都能列出 GPU：
+   `docker run --rm --gpus all … --list-devices` 与 `docker run --rm --runtime=nvidia …` → `CUDA0: RTX 3090 (24089 MiB, ~22.7 GB free)`。
+3. `make down && make up-uncensored` → 预检打印 `1, /app/llama-server, 20976 MiB` / `✓ 显存占用 22205 MiB`；
+   `curl localhost:8081/v1/chat/completions` 正常出 token（reasoning 走 reasoning_content）。
+4. 反证：把旧规格装回后，非特权容器里 CUDA 必失败（`--privileged` 才通），说明与驱动无关、就是注入的设备错。
+
+**防复发**：新增 `scripts/require-gpu.sh`（`make up` / `make up-uncensored` 起容器前后自动跑，
+失败即停容器并打印修法）；`fix-driver-manual.sh --cdi`；`install-gpu-nodes-service.sh` 的开机
+oneshot 服务现在同时校验 CDI 规格的 uvm 主设备号，不一致就重生成。
+注：llama.cpp b10853 **成功时不打任何 CUDA 日志行**，所以「有没有上卡」只能看显存/进程，不能 grep 日志。
