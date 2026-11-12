@@ -1,4 +1,12 @@
 .PHONY: download download-uncensored up up-uncensored down down-uncensored logs fix-driver setup-docker autostart-off install-gpu-nodes
+
+# .env 是唯一事实来源。dsh-tui / CI 会把 .env 的**快照**注入进程环境，而 docker compose 的
+# 优先级是「shell 环境 > .env 文件」——不显式覆盖的话，改了 .env 也会被会话里的旧值静默盖掉
+# （2026-09-16 实测：.env 改成 CTX_SIZE=180224，compose config 仍展开成 131072）。
+# 临时覆盖仍走 make 命令行变量（它会覆盖 include 进来的值）：make CTX_SIZE=262144 up
+-include .env
+export
+
 download:
 	bash scripts/download-model.sh
 
